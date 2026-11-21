@@ -1,0 +1,6 @@
+{
+  "name": "CKD 76 — Class Meeting & Tournament Chronicle",
+  "description": "A warm, minimalist announcement hub for CKD Class Meeting featuring live competition schedules, tournament brackets, multi-game leaderboards, previous champions, and an editorial bulletin.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

@@ -1,0 +1,107 @@
+@import "tailwindcss";
+@custom-variant dark (&:where(.dark, .dark *));
+
+@theme {
+  --font-serif: "Fraunces", Georgia, Cambria, "Times New Roman", Times, serif;
+  --font-cinzel: "Cinzel", Georgia, serif;
+  --font-bebas: "Bebas Neue", Impact, sans-serif;
+  --font-sans: "Plus Jakarta Sans", -apple-system, BlinkMacSystemFont, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+}
+
+:root {
+  --accent-primary: #c25e00;
+  --accent-primary-hover: #a34d00;
+  --accent-soft: rgba(194, 94, 0, 0.08);
+  --accent-text: #b45309;
+}
+
+.dark {
+  --accent-primary: #ff9a07;
+  --accent-primary-hover: #ffb13b;
+  --accent-soft: rgba(255, 154, 7, 0.14);
+  --accent-text: #ff9a07;
+}
+
+[data-accent="forest"] {
+  --accent-primary: #1f4d3a;
+  --accent-primary-hover: #173b2c;
+  --accent-soft: rgba(31, 77, 58, 0.08);
+  --accent-text: #1f4d3a;
+}
+
+.dark[data-accent="forest"] {
+  --accent-primary: #529e7e;
+  --accent-primary-hover: #67b393;
+  --accent-soft: rgba(82, 158, 126, 0.14);
+  --accent-text: #7ec4a5;
+}
+
+[data-accent="amber"] {
+  --accent-primary: #c25e00;
+  --accent-primary-hover: #a34d00;
+  --accent-soft: rgba(194, 94, 0, 0.09);
+  --accent-text: #b45309;
+}
+
+.dark[data-accent="amber"] {
+  --accent-primary: #ff9a07;
+  --accent-primary-hover: #ffb13b;
+  --accent-soft: rgba(255, 154, 7, 0.15);
+  --accent-text: #ff9a07;
+}
+
+[data-accent="slate"] {
+  --accent-primary: #29384c;
+  --accent-primary-hover: #1e2a3a;
+  --accent-soft: rgba(41, 56, 76, 0.08);
+  --accent-text: #29384c;
+}
+
+.dark[data-accent="slate"] {
+  --accent-primary: #8ba3c7;
+  --accent-primary-hover: #a1b6d6;
+  --accent-soft: rgba(139, 163, 199, 0.15);
+  --accent-text: #a5bce0;
+}
+
+html {
+  scroll-behavior: smooth;
+  font-family: var(--font-sans);
+}
+
+.tabular-nums {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Signature sweep animation for countdown boxes */
+@keyframes tk-sweep {
+  to {
+    left: 150%;
+  }
+}
+
+.tk-countdown-box::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: -120%;
+  width: 80%;
+  height: 100%;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.09), transparent);
+  transform: skewX(-20deg);
+  pointer-events: none;
+}
+
+.tk-countdown-box:hover::before {
+  animation: tk-sweep 0.9s ease forwards;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+  .tk-countdown-box:hover::before {
+    animation: none;
+  }
+}
