@@ -186,25 +186,29 @@ export const AdminModal: React.FC<AdminModalProps> = ({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ password: trimmed, mode: loginMode }),
       });
-      const payload = (await res.json().catch(() => ({}))) as {
+      const payload = (await res.json().catch(() => null)) as {
         ok?: boolean;
         role?: AuthRole;
         token?: string;
         error?: string;
-      };
-      if (res.ok && payload.ok && payload.token && payload.role) {
+      } | null;
+      if (res.ok && payload?.ok && payload.token && payload.role) {
         onPlaySound('unlock');
         setPasswordInput('');
         setActiveTab(payload.role === 'master' ? 'master' : availableTabs[0]?.id || 'site');
         onUnlockSuccess(payload.role, payload.token);
       } else {
         onPlaySound('error');
-        setAuthError(
-          payload.error ||
-            (loginMode === 'master'
-              ? 'Incorrect Master password.'
-              : 'Incorrect administrator password.')
-        );
+        if (!payload || (res.status !== 401 && res.status !== 403 && !payload.error)) {
+          setAuthError(`Authentication endpoint error (HTTP ${res.status}). Check server / API deployment.`);
+        } else {
+          setAuthError(
+            payload.error ||
+              (loginMode === 'master'
+                ? 'Incorrect Master password.'
+                : 'Incorrect administrator password.')
+          );
+        }
       }
     } catch {
       onPlaySound('error');
