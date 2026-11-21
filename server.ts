@@ -2,13 +2,13 @@ import express from 'express';
 import type { Request, Response } from 'express';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { createApiApp } from './src/server/apiApp.ts';
+import { createApiApp } from './api/index.ts';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 async function startServer(): Promise<void> {
-  const app = createApiApp();
+  const app = createApiApp({ mountRootRoutes: false });
   const port = Number(process.env.PORT) || 3000;
 
   const isProd = process.env.NODE_ENV === 'production';
