@@ -1,0 +1,157 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Pillar 0: Default-deny global catch-all
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Pillar 3: Reusable hardened primitives
+    function isValidId(id) {
+      return id is string && id.size() > 0 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isSignedIn() {
+      return request.auth != null && request.auth.token.email_verified == true;
+    }
+
+    function isBootstrappedMaster() {
+      return isSignedIn() && request.auth.token.email == 'cassius.steve123@gmail.com';
+    }
+
+    function isAdminMember() {
+      return isSignedIn() && exists(/databases/$(database)/documents/admins/$(request.auth.uid));
+    }
+
+    function isAuthorizedEditor() {
+      return isBootstrappedMaster() || isAdminMember();
+    }
+
+    // Pillar 2 & 5: Strict schema & bounded array validation for publicState
+    function isValidPublicState(data) {
+      return data.keys().hasAll([
+        'banner',
+        'siteCopy',
+        'adminPanelConfig',
+        'teams',
+        'announcements',
+        'categories',
+        'leaderboards',
+        'lastUpdated',
+        'updatedAt',
+        'updatedBy'
+      ])
+      && data.keys().hasOnly([
+        'banner',
+        'siteCopy',
+        'adminPanelConfig',
+        'teams',
+        'announcements',
+        'categories',
+        'leaderboards',
+        'lastUpdated',
+        'updatedAt',
+        'updatedBy'
+      ])
+      && data.banner is map && data.banner.keys().size() <= 20
+      && data.siteCopy is map && data.siteCopy.keys().size() <= 200
+      && data.adminPanelConfig is map && data.adminPanelConfig.keys().size() <= 20
+      && data.teams is list && data.teams.size() <= 100 && (data.teams.size() == 0 || data.teams[0] is map)
+      && data.announcements is list && data.announcements.size() <= 300 && (data.announcements.size() == 0 || data.announcements[0] is map)
+      && data.categories is list && data.categories.size() <= 50 && (data.categories.size() == 0 || data.categories[0] is map)
+      && data.leaderboards is list && data.leaderboards.size() <= 50 && (data.leaderboards.size() == 0 || data.leaderboards[0] is map)
+      && data.lastUpdated is string && data.lastUpdated.size() > 0 && data.lastUpdated.size() <= 64
+      && data.updatedAt is timestamp && data.updatedAt == request.time
+      && data.updatedBy is string && data.updatedBy == request.auth.uid && data.updatedBy.size() <= 128;
+    }
+
+    function isValidAdminMember(data) {
+      return data.keys().hasAll(['role', 'label', 'addedBy', 'createdAt'])
+      && data.keys().hasOnly(['role', 'label', 'addedBy', 'createdAt'])
+      && data.role is string && data.role == 'admin'
+      && data.label is string && data.label.size() > 0 && data.label.size() <= 100
+      && data.addedBy is string && data.addedBy == request.auth.uid && data.addedBy.size() <= 128
+      && data.createdAt is timestamp;
+    }
+
+    function isValidAdminAuth(data) {
+      return data.keys().hasAll(['authEnvelope', 'passwordVersion', 'updatedAt', 'updatedBy'])
+      && data.keys().hasOnly(['authEnvelope', 'passwordVersion', 'updatedAt', 'updatedBy'])
+      && data.authEnvelope is string && data.authEnvelope.size() > 0 && data.authEnvelope.size() <= 1024
+      && data.passwordVersion is int && data.passwordVersion >= 2 && data.passwordVersion <= 1000000
+      && data.updatedAt is timestamp && data.updatedAt == request.time
+      && data.updatedBy is string && data.updatedBy == request.auth.uid && data.updatedBy.size() <= 128;
+    }
+
+    // Shared tournament state document read by any visitor device, written only by Master or authorized Admins
+    match /publicState/{docId} {
+      allow get: if isValidId(docId) && docId == 'current';
+      allow list: if false;
+      allow create: if isAuthorizedEditor()
+        && isValidId(docId)
+        && docId == 'current'
+        && isValidPublicState(incoming());
+      allow update: if isAuthorizedEditor()
+        && isValidId(docId)
+        && docId == 'current'
+        && isValidPublicState(incoming())
+        && (
+          (isBootstrappedMaster() && incoming().diff(existing()).affectedKeys().hasOnly([
+            'banner', 'siteCopy', 'adminPanelConfig', 'teams', 'announcements', 'categories', 'leaderboards', 'lastUpdated', 'updatedAt', 'updatedBy'
+          ])) ||
+          (isAdminMember() && incoming().adminPanelConfig == existing().adminPanelConfig && incoming().diff(existing()).affectedKeys().hasOnly([
+            'banner', 'siteCopy', 'teams', 'announcements', 'categories', 'leaderboards', 'lastUpdated', 'updatedAt', 'updatedBy'
+          ]))
+        );
+      allow delete: if false;
+    }
+
+    // Invited Admin UIDs managed exclusively by Master
+    match /admins/{adminUid} {
+      allow get: if isSignedIn() && isValidId(adminUid) && (request.auth.uid == adminUid || isBootstrappedMaster());
+      allow list: if isBootstrappedMaster();
+      allow create: if isBootstrappedMaster()
+        && isValidId(adminUid)
+        && isValidAdminMember(incoming())
+        && incoming().createdAt == request.time;
+      allow update: if isBootstrappedMaster()
+        && isValidId(adminUid)
+        && isValidAdminMember(incoming())
+        && incoming().createdAt == existing().createdAt
+        && incoming().addedBy == existing().addedBy
+        && incoming().diff(existing()).affectedKeys().hasOnly(['role', 'label']);
+      allow delete: if isBootstrappedMaster() && isValidId(adminUid);
+    }
+
+    // Server-sealed admin password rotation envelope managed strictly by Master
+    match /adminAuth/{docId} {
+      allow get: if isValidId(docId) && docId == 'current';
+      allow list: if false;
+      allow create: if isBootstrappedMaster()
+        && isValidId(docId)
+        && docId == 'current'
+        && isValidAdminAuth(incoming());
+      allow update: if isBootstrappedMaster()
+        && isValidId(docId)
+        && docId == 'current'
+        && isValidAdminAuth(incoming())
+        && incoming().passwordVersion > existing().passwordVersion
+        && incoming().diff(existing()).affectedKeys().hasOnly(['authEnvelope', 'passwordVersion', 'updatedAt', 'updatedBy']);
+      allow delete: if false;
+    }
+
+    // Read-only connection probe endpoint
+    match /test/{docId} {
+      allow get: if isValidId(docId) && docId == 'connection';
+      allow list, write: if false;
+    }
+  }
+}

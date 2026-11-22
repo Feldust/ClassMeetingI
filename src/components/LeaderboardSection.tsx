@@ -1,12 +1,11 @@
 import React, { useState, useMemo } from 'react';
 import { ArrowUpDown, Search } from 'lucide-react';
-import type { LeaderboardGame } from '../types';
+import type { LeaderboardGame, SiteCopyConfig } from '../types';
 
 interface LeaderboardSectionProps {
   leaderboards: LeaderboardGame[];
   compact: boolean;
-  eyebrow?: string;
-  heading?: string;
+  siteCopy?: Partial<SiteCopyConfig>;
   onSoundTap: () => void;
 }
 
@@ -15,10 +14,28 @@ type SortKey = 'points' | 'won' | 'played';
 export const LeaderboardSection: React.FC<LeaderboardSectionProps> = ({
   leaderboards,
   compact,
-  eyebrow = 'Leaderboard Mode',
-  heading = 'Standings Across Game Modes',
+  siteCopy,
   onSoundTap,
 }) => {
+  const eyebrow = siteCopy?.leaderboardEyebrow || 'Leaderboard Mode';
+  const heading = siteCopy?.leaderboardHeading || 'Standings Across Game Modes';
+  const searchPlaceholder = siteCopy?.leaderboardSearchPlaceholder || 'Filter class or player...';
+  const sortLabel = siteCopy?.leaderboardSortLabel || 'Sort by:';
+  const sortLabels: Record<SortKey, string> = {
+    points: siteCopy?.leaderboardSortPointsLabel || 'Points',
+    won: siteCopy?.leaderboardSortWinsLabel || 'Wins',
+    played: siteCopy?.leaderboardSortPlayedLabel || 'Played',
+  };
+  const colRank = siteCopy?.leaderboardColRank || 'Rank';
+  const colContender = siteCopy?.leaderboardColContender || 'Class / Contender';
+  const colPlayed = siteCopy?.leaderboardColPlayed || 'Played';
+  const colGold = siteCopy?.leaderboardColGold || 'Gold';
+  const colSilver = siteCopy?.leaderboardColSilver || 'Silver';
+  const colBronze = siteCopy?.leaderboardColBronze || 'Bronze';
+  const colWon = siteCopy?.leaderboardColWon || 'Won';
+  const colDrawn = siteCopy?.leaderboardColDrawn || 'Drawn';
+  const colLost = siteCopy?.leaderboardColLost || 'Lost';
+  const emptyText = siteCopy?.leaderboardEmptyText || 'No contenders match your search filter.';
   const [selectedBoardId, setSelectedBoardId] = useState<string>(
     leaderboards[0]?.id || 'lb-overall'
   );
@@ -65,7 +82,7 @@ export const LeaderboardSection: React.FC<LeaderboardSectionProps> = ({
             type="text"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder="Filter class or player..."
+            placeholder={searchPlaceholder}
             className="w-full pl-10 pr-4 py-2 text-sm rounded-lg bg-white dark:bg-[#1C1917] border border-stone-200 dark:border-stone-800 text-stone-900 dark:text-stone-100 placeholder:text-stone-400 focus:outline-none focus:border-stone-400 dark:focus:border-stone-600 transition-colors"
           />
         </div>
@@ -99,7 +116,7 @@ export const LeaderboardSection: React.FC<LeaderboardSectionProps> = ({
         {/* Sort Controls */}
         <div className="flex items-center gap-1.5 text-xs text-stone-500 dark:text-stone-400">
           <ArrowUpDown className="w-3.5 h-3.5" />
-          <span>Sort by:</span>
+          <span>{sortLabel}</span>
           {(['points', 'won', 'played'] as const).map((key) => (
             <button
               key={key}
@@ -108,13 +125,13 @@ export const LeaderboardSection: React.FC<LeaderboardSectionProps> = ({
                 onSoundTap();
                 setSortKey(key);
               }}
-              className={`px-2.5 py-1 rounded-md font-medium capitalize transition-colors cursor-pointer ${
+              className={`px-2.5 py-1 rounded-md font-medium transition-colors cursor-pointer ${
                 sortKey === key
                   ? 'bg-stone-200/80 dark:bg-stone-800 text-stone-950 dark:text-stone-100'
                   : 'hover:text-stone-900 dark:hover:text-stone-200'
               }`}
             >
-              {key === 'won' ? 'Wins' : key}
+              {sortLabels[key]}
             </button>
           ))}
         </div>
@@ -130,20 +147,20 @@ export const LeaderboardSection: React.FC<LeaderboardSectionProps> = ({
           <table className="w-full text-left border-collapse">
             <thead>
               <tr className="border-b border-stone-200 dark:border-stone-800 text-xs text-stone-500 dark:text-stone-400 bg-stone-50/70 dark:bg-stone-900/50">
-                <th className="py-3.5 pl-5 pr-3 font-medium w-16">Rank</th>
-                <th className="py-3.5 px-4 font-medium">Class / Contender</th>
-                <th className="py-3.5 px-3 font-medium text-right">Played</th>
+                <th className="py-3.5 pl-5 pr-3 font-medium w-16">{colRank}</th>
+                <th className="py-3.5 px-4 font-medium">{colContender}</th>
+                <th className="py-3.5 px-3 font-medium text-right">{colPlayed}</th>
                 {activeBoard.gameType === 'medal-tally' ? (
                   <>
-                    <th className="py-3.5 px-3 font-medium text-right">Gold</th>
-                    <th className="py-3.5 px-3 font-medium text-right">Silver</th>
-                    <th className="py-3.5 px-3 font-medium text-right">Bronze</th>
+                    <th className="py-3.5 px-3 font-medium text-right">{colGold}</th>
+                    <th className="py-3.5 px-3 font-medium text-right">{colSilver}</th>
+                    <th className="py-3.5 px-3 font-medium text-right">{colBronze}</th>
                   </>
                 ) : (
                   <>
-                    <th className="py-3.5 px-3 font-medium text-right">Won</th>
-                    <th className="py-3.5 px-3 font-medium text-right">Drawn</th>
-                    <th className="py-3.5 px-3 font-medium text-right">Lost</th>
+                    <th className="py-3.5 px-3 font-medium text-right">{colWon}</th>
+                    <th className="py-3.5 px-3 font-medium text-right">{colDrawn}</th>
+                    <th className="py-3.5 px-3 font-medium text-right">{colLost}</th>
                   </>
                 )}
                 <th className="py-3.5 px-4 font-medium hidden sm:table-cell">
@@ -161,7 +178,7 @@ export const LeaderboardSection: React.FC<LeaderboardSectionProps> = ({
                     colSpan={8}
                     className="py-10 px-6 text-center text-stone-500 dark:text-stone-400"
                   >
-                    No contenders match your search filter.
+                    {emptyText}
                   </td>
                 </tr>
               ) : (

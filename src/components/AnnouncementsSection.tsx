@@ -8,13 +8,12 @@ import {
   MapPin,
   UserCheck,
 } from 'lucide-react';
-import type { Announcement, RundownStatus } from '../types';
+import type { Announcement, RundownStatus, SiteCopyConfig } from '../types';
 
 interface AnnouncementsSectionProps {
   announcements: Announcement[];
   compact: boolean;
-  eyebrow?: string;
-  heading?: string;
+  siteCopy?: Partial<SiteCopyConfig>;
   onSoundTap: () => void;
 }
 
@@ -44,24 +43,44 @@ function statusClasses(status?: RundownStatus): string {
 export const AnnouncementsSection: React.FC<AnnouncementsSectionProps> = ({
   announcements,
   compact,
-  eyebrow = 'Event Rundown & Schedule',
-  heading = 'Daily Rundown & Activity Timeline',
+  siteCopy,
   onSoundTap,
 }) => {
-  const [selectedDay, setSelectedDay] = useState<string>('All Days');
-  const [selectedCategory, setSelectedCategory] = useState<string>('All');
+  const eyebrow = siteCopy?.announcementsEyebrow || 'Event Rundown & Schedule';
+  const heading = siteCopy?.announcementsHeading || 'Daily Rundown & Activity Timeline';
+  const searchPlaceholder =
+    siteCopy?.rundownSearchPlaceholder || 'Search schedule, venues, or PIC...';
+  const allDaysLabel = siteCopy?.rundownAllDaysLabel || 'All Days';
+  const allCatsLabel = siteCopy?.rundownAllCategoriesLabel || 'All';
+  const featuredBadge = siteCopy?.rundownFeaturedBadge || 'Featured Schedule Slot';
+  const showDetailsLabel = siteCopy?.rundownShowDetailsLabel || 'Session Details';
+  const hideDetailsLabel = siteCopy?.rundownHideDetailsLabel || 'Hide Details';
+  const coordinatorLabel = siteCopy?.rundownCoordinatorLabel || 'Coordinator / PIC:';
+  const emptyTitle = siteCopy?.rundownEmptyTitle || 'No rundown slots match this filter.';
+  const emptySubtitle =
+    siteCopy?.rundownEmptySubtitle || 'Try clearing your search query or switching back to All Days.';
+  const resetFilterLabel = siteCopy?.rundownResetFilterLabel || 'Show Full Schedule';
+
+  const [selectedDay, setSelectedDay] = useState<string>('ALL_DAYS');
+  const [selectedCategory, setSelectedCategory] = useState<string>('ALL_CATEGORIES');
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [expandedId, setExpandedId] = useState<string | null>(null);
 
   const dayTabs = useMemo(() => {
     const unique = Array.from(new Set(announcements.map(resolveDayLabel)));
-    return ['All Days', ...unique];
-  }, [announcements]);
+    return [
+      { id: 'ALL_DAYS', label: allDaysLabel },
+      ...unique.map((d) => ({ id: d, label: d })),
+    ];
+  }, [announcements, allDaysLabel]);
 
   const categories = useMemo(() => {
     const unique = Array.from(new Set(announcements.map((a) => a.category)));
-    return ['All', ...unique];
-  }, [announcements]);
+    return [
+      { id: 'ALL_CATEGORIES', label: allCatsLabel },
+      ...unique.map((c) => ({ id: c, label: c })),
+    ];
+  }, [announcements, allCatsLabel]);
 
   const featuredSession = useMemo(() => {
     return announcements.find((a) => a.isFeatured) || announcements[0] || null;
@@ -70,8 +89,8 @@ export const AnnouncementsSection: React.FC<AnnouncementsSectionProps> = ({
   const filteredSessions = useMemo(() => {
     return announcements.filter((a) => {
       const itemDay = resolveDayLabel(a);
-      const matchesDay = selectedDay === 'All Days' || itemDay === selectedDay;
-      const matchesCat = selectedCategory === 'All' || a.category === selectedCategory;
+      const matchesDay = selectedDay === 'ALL_DAYS' || itemDay === selectedDay;
+      const matchesCat = selectedCategory === 'ALL_CATEGORIES' || a.category === selectedCategory;
       const q = searchQuery.trim().toLowerCase();
       const matchesQuery =
         !q ||
@@ -103,7 +122,7 @@ export const AnnouncementsSection: React.FC<AnnouncementsSectionProps> = ({
   }, [filteredSessions]);
 
   const isUnfiltered =
-    selectedDay === 'All Days' && selectedCategory === 'All' && !searchQuery.trim();
+    selectedDay === 'ALL_DAYS' && selectedCategory === 'ALL_CATEGORIES' && !searchQuery.trim();
 
   return (
     <section id="rundown" className={compact ? 'py-8' : 'py-12'}>
@@ -124,7 +143,7 @@ export const AnnouncementsSection: React.FC<AnnouncementsSectionProps> = ({
             type="text"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder="Search schedule, venues, or PIC..."
+            placeholder={searchPlaceholder}
             className="w-full pl-10 pr-4 py-2 text-sm rounded-lg bg-white dark:bg-[#1C1917] border border-stone-200 dark:border-stone-800 text-stone-900 dark:text-stone-100 placeholder:text-stone-400 focus:outline-none focus:border-stone-400 dark:focus:border-stone-600 transition-colors"
           />
         </div>
@@ -136,14 +155,14 @@ export const AnnouncementsSection: React.FC<AnnouncementsSectionProps> = ({
         <div className="flex items-center gap-1.5 overflow-x-auto pb-1">
           <div className="inline-flex items-center gap-1 p-1 rounded-lg bg-stone-200/55 dark:bg-stone-900 border border-stone-200/60 dark:border-stone-800">
             {dayTabs.map((day) => {
-              const active = selectedDay === day;
+              const active = selectedDay === day.id;
               return (
                 <button
-                  key={day}
+                  key={day.id}
                   type="button"
                   onClick={() => {
                     onSoundTap();
-                    setSelectedDay(day);
+                    setSelectedDay(day.id);
                   }}
                   className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
                     active
@@ -151,7 +170,7 @@ export const AnnouncementsSection: React.FC<AnnouncementsSectionProps> = ({
                       : 'text-stone-600 dark:text-stone-400 hover:text-stone-900 dark:hover:text-stone-200'
                   }`}
                 >
-                  {day}
+                  {day.label}
                 </button>
               );
             })}
@@ -162,14 +181,14 @@ export const AnnouncementsSection: React.FC<AnnouncementsSectionProps> = ({
         <div className="flex items-center gap-1.5 overflow-x-auto pb-1">
           <div className="inline-flex items-center gap-1 p-1 rounded-lg bg-stone-200/40 dark:bg-stone-900/70 border border-stone-200/60 dark:border-stone-800">
             {categories.map((cat) => {
-              const active = selectedCategory === cat;
+              const active = selectedCategory === cat.id;
               return (
                 <button
-                  key={cat}
+                  key={cat.id}
                   type="button"
                   onClick={() => {
                     onSoundTap();
-                    setSelectedCategory(cat);
+                    setSelectedCategory(cat.id);
                   }}
                   className={`px-2.5 py-1 text-xs font-medium rounded-md transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
                     active
@@ -177,7 +196,7 @@ export const AnnouncementsSection: React.FC<AnnouncementsSectionProps> = ({
                       : 'text-stone-600 dark:text-stone-400 hover:text-stone-900 dark:hover:text-stone-200'
                   }`}
                 >
-                  {cat}
+                  {cat.label}
                 </button>
               );
             })}
@@ -191,7 +210,7 @@ export const AnnouncementsSection: React.FC<AnnouncementsSectionProps> = ({
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div className="flex flex-wrap items-center gap-2 text-xs text-stone-500 dark:text-stone-400">
               <span className="font-['Cinzel',Georgia,serif] font-semibold tracking-wider uppercase text-[var(--accent-text)]">
-                Featured Schedule Slot
+                {featuredBadge}
               </span>
               <span aria-hidden="true">·</span>
               <span>{resolveDayLabel(featuredSession)}</span>
@@ -223,7 +242,9 @@ export const AnnouncementsSection: React.FC<AnnouncementsSectionProps> = ({
           <div className="mt-5 pt-4 border-t border-stone-100 dark:border-stone-800/80 flex flex-wrap items-center justify-between gap-2 text-xs text-stone-500 dark:text-stone-400">
             <span className="inline-flex items-center gap-1.5">
               <UserCheck className="w-3.5 h-3.5" />
-              <span>Coordinator / PIC: {featuredSession.author}</span>
+              <span>
+                {coordinatorLabel} {featuredSession.author}
+              </span>
             </span>
             <span>
               {featuredSession.category} · {featuredSession.priority}
@@ -235,23 +256,19 @@ export const AnnouncementsSection: React.FC<AnnouncementsSectionProps> = ({
       {/* Chronological Grouped-By-Day Timeline */}
       {groupedByDay.length === 0 ? (
         <div className="mt-8 rounded-2xl bg-white dark:bg-[#1C1917] border border-stone-200/90 dark:border-stone-800 p-10 text-center">
-          <p className="font-serif text-lg text-stone-800 dark:text-stone-200">
-            No rundown slots match this filter.
-          </p>
-          <p className="text-sm text-stone-500 dark:text-stone-400 mt-1 mb-4">
-            Try clearing your search query or switching back to All Days.
-          </p>
+          <p className="font-serif text-lg text-stone-800 dark:text-stone-200">{emptyTitle}</p>
+          <p className="text-sm text-stone-500 dark:text-stone-400 mt-1 mb-4">{emptySubtitle}</p>
           <button
             type="button"
             onClick={() => {
               onSoundTap();
-              setSelectedDay('All Days');
-              setSelectedCategory('All');
+              setSelectedDay('ALL_DAYS');
+              setSelectedCategory('ALL_CATEGORIES');
               setSearchQuery('');
             }}
             className="px-4 py-2 text-xs font-medium rounded-lg bg-stone-900 text-stone-50 dark:bg-stone-100 dark:text-stone-900 hover:opacity-90 transition-opacity cursor-pointer"
           >
-            Show Full Schedule
+            {resetFilterLabel}
           </button>
         </div>
       ) : (
@@ -325,7 +342,9 @@ export const AnnouncementsSection: React.FC<AnnouncementsSectionProps> = ({
                           {isExpanded && (
                             <p className="text-xs text-stone-500 dark:text-stone-400 mt-3 inline-flex items-center gap-1.5">
                               <UserCheck className="w-3.5 h-3.5" />
-                              <span>Coordinator / PIC: {item.author}</span>
+                              <span>
+                                {coordinatorLabel} {item.author}
+                              </span>
                             </p>
                           )}
                         </div>
@@ -339,7 +358,7 @@ export const AnnouncementsSection: React.FC<AnnouncementsSectionProps> = ({
                           }}
                           className="self-start inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-stone-700 dark:text-stone-300 hover:text-stone-950 dark:hover:text-stone-50 rounded-lg border border-stone-200 dark:border-stone-800 hover:bg-stone-50 dark:hover:bg-stone-800/70 transition-colors whitespace-nowrap shrink-0 cursor-pointer"
                         >
-                          <span>{isExpanded ? 'Hide Details' : 'Session Details'}</span>
+                          <span>{isExpanded ? hideDetailsLabel : showDetailsLabel}</span>
                           {isExpanded ? (
                             <ChevronUp className="w-3.5 h-3.5" />
                           ) : (

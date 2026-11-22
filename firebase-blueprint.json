@@ -1,0 +1,135 @@
+{
+  "entities": {
+    "PublicTournamentState": {
+      "title": "PublicTournamentState",
+      "description": "Shared public tournament state synced across all devices for CKD 76 Class Meeting.",
+      "type": "object",
+      "properties": {
+        "banner": {
+          "type": "object",
+          "description": "Hero banner metadata and titles."
+        },
+        "siteCopy": {
+          "type": "object",
+          "description": "Editable navigation, page headings, labels, and UI elements."
+        },
+        "adminPanelConfig": {
+          "type": "object",
+          "description": "Master-configured Admin Panel labels and tab permissions."
+        },
+        "teams": {
+          "type": "array",
+          "description": "Participating classes and teams."
+        },
+        "announcements": {
+          "type": "array",
+          "description": "Daily event rundown and activity timeline slots."
+        },
+        "categories": {
+          "type": "array",
+          "description": "Competition categories, brackets, match results, and events."
+        },
+        "leaderboards": {
+          "type": "array",
+          "description": "Standings tables across game modes."
+        },
+        "lastUpdated": {
+          "type": "string",
+          "maxLength": 64,
+          "description": "ISO client timestamp of last publication."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp of the latest Cloud Firestore sync."
+        },
+        "updatedBy": {
+          "type": "string",
+          "maxLength": 128,
+          "description": "UID of the authenticated organizer who published the update."
+        }
+      },
+      "required": [
+        "banner",
+        "siteCopy",
+        "adminPanelConfig",
+        "teams",
+        "announcements",
+        "categories",
+        "leaderboards",
+        "lastUpdated",
+        "updatedAt",
+        "updatedBy"
+      ]
+    },
+    "AdminMember": {
+      "title": "AdminMember",
+      "description": "Authorized Google-authenticated organizer permitted by Master to publish cross-device updates.",
+      "type": "object",
+      "properties": {
+        "role": {
+          "type": "string",
+          "enum": ["admin"],
+          "description": "Organizer role identifier."
+        },
+        "label": {
+          "type": "string",
+          "maxLength": 100,
+          "description": "Human-readable committee label."
+        },
+        "addedBy": {
+          "type": "string",
+          "maxLength": 128,
+          "description": "UID of the Master user who granted access."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp when access was granted."
+        }
+      },
+      "required": ["role", "label", "addedBy", "createdAt"]
+    },
+    "AdminAuthState": {
+      "title": "AdminAuthState",
+      "description": "Server-sealed AES-256-GCM admin password rotation envelope and version managed strictly by Master.",
+      "type": "object",
+      "properties": {
+        "authEnvelope": {
+          "type": "string",
+          "maxLength": 1024,
+          "description": "AES-256-GCM authenticated ciphertext containing rotated scrypt salt, hash, and version."
+        },
+        "passwordVersion": {
+          "type": "integer",
+          "description": "Monotonically increasing admin password version used to reject old passwords and stale sessions."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp of the latest password rotation."
+        },
+        "updatedBy": {
+          "type": "string",
+          "maxLength": 128,
+          "description": "UID of the Master user who rotated the password."
+        }
+      },
+      "required": ["authEnvelope", "passwordVersion", "updatedAt", "updatedBy"]
+    }
+  },
+  "firestore": {
+    "/publicState/{docId}": {
+      "schema": { "$ref": "#/entities/PublicTournamentState" },
+      "description": "Single public document ('current') storing the live cross-device tournament state."
+    },
+    "/admins/{adminUid}": {
+      "schema": { "$ref": "#/entities/AdminMember" },
+      "description": "Organizer UIDs granted write access to /publicState/current by Master."
+    },
+    "/adminAuth/{docId}": {
+      "schema": { "$ref": "#/entities/AdminAuthState" },
+      "description": "Single document ('current') storing the server-encrypted admin password rotation envelope and version."
+    }
+  }
+}

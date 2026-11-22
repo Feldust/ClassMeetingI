@@ -165,7 +165,7 @@ export const HomeView: React.FC<HomeViewProps> = ({
 
             <div className="mt-6 pt-4 border-t border-stone-100 dark:border-stone-800/80 flex items-center justify-between">
               <span className="text-xs text-stone-500 dark:text-stone-400">
-                {data.announcements.length} scheduled sessions
+                {data.announcements.length} {data.siteCopy.homeSessionsCountLabel}
               </span>
               <button
                 type="button"
@@ -236,7 +236,9 @@ export const HomeView: React.FC<HomeViewProps> = ({
                         {m.categoryName} · {m.round}
                       </span>
                       <p className="text-sm font-medium text-stone-900 dark:text-stone-100">
-                        {m.teamA} <span className="text-stone-400 mx-1">vs</span> {m.teamB}
+                        {m.teamA}{' '}
+                        <span className="text-stone-400 mx-1">{data.siteCopy.homeVersusLabel}</span>{' '}
+                        {m.teamB}
                       </p>
                     </div>
                     <div className="flex items-center gap-3 text-xs text-stone-500 dark:text-stone-400 font-mono tabular-nums shrink-0">

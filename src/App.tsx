@@ -28,8 +28,19 @@ function pathForRoute(page: PageRoute): string {
 
 export function App() {
   const { settings, updateSettings } = useUISettings();
-  const { data, saveStatus, persistData, resetToDefault, changeAdminPassword } =
-    useTournamentStore();
+  const {
+    data,
+    saveStatus,
+    cloudUser,
+    cloudAuthorized,
+    isCloudMaster,
+    hasCloudDocument,
+    cloudPasswordVersion,
+    connectGoogleSync,
+    disconnectGoogleSync,
+    persistData,
+    changeAdminPassword,
+  } = useTournamentStore();
 
   const [currentPage, setCurrentPage] = useState<PageRoute>(() =>
     parseRouteFromPath(window.location.pathname)
@@ -40,6 +51,21 @@ export function App() {
   const [isAdminModalOpen, setIsAdminModalOpen] = useState(false);
   const [authRole, setAuthRole] = useState<AuthRole | null>(null);
   const [sessionToken, setSessionToken] = useState('');
+  const [unlockedPwdVersion, setUnlockedPwdVersion] = useState<number>(0);
+
+  // Immediately lock active standard Admin sessions across devices if Master rotates the password
+  useEffect(() => {
+    if (
+      authRole === 'admin' &&
+      sessionToken &&
+      unlockedPwdVersion > 0 &&
+      cloudPasswordVersion > unlockedPwdVersion
+    ) {
+      setAuthRole(null);
+      setSessionToken('');
+      setUnlockedPwdVersion(0);
+    }
+  }, [authRole, sessionToken, unlockedPwdVersion, cloudPasswordVersion]);
 
   // Support browser back/forward navigation between dedicated pages
   useEffect(() => {
@@ -111,8 +137,7 @@ export function App() {
               <AnnouncementsSection
                 announcements={data.announcements}
                 compact={settings.compactDensity}
-                eyebrow={data.siteCopy.announcementsEyebrow}
-                heading={data.siteCopy.announcementsHeading}
+                siteCopy={data.siteCopy}
                 onSoundTap={() => triggerSound('tap')}
               />
             )}
@@ -123,8 +148,7 @@ export function App() {
                 teams={data.teams}
                 compact={settings.compactDensity}
                 initialCategoryId={selectedCategoryId}
-                eyebrow={data.siteCopy.competitionsEyebrow}
-                heading={data.siteCopy.competitionsHeading}
+                siteCopy={data.siteCopy}
                 onSoundTap={() => triggerSound('tap')}
               />
             )}
@@ -133,8 +157,7 @@ export function App() {
               <LeaderboardSection
                 leaderboards={data.leaderboards}
                 compact={settings.compactDensity}
-                eyebrow={data.siteCopy.leaderboardEyebrow}
-                heading={data.siteCopy.leaderboardHeading}
+                siteCopy={data.siteCopy}
                 onSoundTap={() => triggerSound('tap')}
               />
             )}
@@ -203,18 +226,25 @@ export function App() {
         isUnlocked={isUnlocked}
         authRole={authRole}
         sessionToken={sessionToken}
-        onUnlockSuccess={(role, token) => {
+        onUnlockSuccess={(role, token, pwdVersion) => {
           setAuthRole(role);
           setSessionToken(token);
+          setUnlockedPwdVersion(pwdVersion ?? 1);
         }}
         onLockAdmin={() => {
           setAuthRole(null);
           setSessionToken('');
+          setUnlockedPwdVersion(0);
         }}
         appData={data}
         saveStatus={saveStatus}
+        cloudUser={cloudUser}
+        cloudAuthorized={cloudAuthorized}
+        isCloudMaster={isCloudMaster}
+        hasCloudDocument={hasCloudDocument}
+        onConnectGoogleSync={connectGoogleSync}
+        onDisconnectGoogleSync={disconnectGoogleSync}
         onSaveData={persistData}
-        onResetDefault={resetToDefault}
         onChangeAdminPassword={changeAdminPassword}
         onPlaySound={triggerSound}
       />

@@ -7,7 +7,6 @@ import {
   Plus,
   Trash2,
   Check,
-  RotateCcw,
   Calendar,
   GitBranch,
   Users,
@@ -17,7 +16,18 @@ import {
   Crown,
   KeyRound,
   Sliders,
+  Cloud,
+  CloudOff,
+  UserPlus,
 } from 'lucide-react';
+import type { User } from 'firebase/auth';
+import {
+  MASTER_EMAIL,
+  listCloudAdmins,
+  addCloudAdmin,
+  removeCloudAdmin,
+  type CloudAdminRecord,
+} from '../firebase';
 import type {
   AdminPanelConfig,
   AdminPanelTabId,
@@ -44,19 +54,24 @@ interface AdminModalProps {
   isUnlocked: boolean;
   authRole: AuthRole | null;
   sessionToken: string;
-  onUnlockSuccess: (role: AuthRole, token: string) => void;
+  onUnlockSuccess: (role: AuthRole, token: string, passwordVersion?: number) => void;
   onLockAdmin: () => void;
   appData: AppDataState;
   saveStatus: 'idle' | 'saving' | 'saved' | 'error';
+  cloudUser: User | null;
+  cloudAuthorized: boolean;
+  isCloudMaster: boolean;
+  hasCloudDocument: boolean;
+  onConnectGoogleSync: () => Promise<{ ok: boolean; authorized?: boolean; error?: string }>;
+  onDisconnectGoogleSync: () => Promise<void>;
   onSaveData: (
     nextData: AppDataState,
     token: string
-  ) => Promise<{ ok: boolean; error?: string }>;
-  onResetDefault: (token: string) => Promise<{ ok: boolean; error?: string }>;
+  ) => Promise<{ ok: boolean; error?: string; syncedToCloud?: boolean }>;
   onChangeAdminPassword: (
     newPassword: string,
     masterToken: string
-  ) => Promise<{ ok: boolean; error?: string }>;
+  ) => Promise<{ ok: boolean; syncedToCloud?: boolean; warning?: string; error?: string }>;
   onPlaySound: (kind: 'tap' | 'switch' | 'chime' | 'unlock' | 'error') => void;
 }
 
@@ -92,8 +107,13 @@ export const AdminModal: React.FC<AdminModalProps> = ({
   onLockAdmin,
   appData,
   saveStatus,
+  cloudUser,
+  cloudAuthorized,
+  isCloudMaster,
+  hasCloudDocument,
+  onConnectGoogleSync,
+  onDisconnectGoogleSync,
   onSaveData,
-  onResetDefault,
   onChangeAdminPassword,
   onPlaySound,
 }) => {
@@ -107,6 +127,7 @@ export const AdminModal: React.FC<AdminModalProps> = ({
   const [draft, setDraft] = useState<AppDataState>(() => structuredClone(appData));
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
   const [actionError, setActionError] = useState('');
+  const [cloudConnecting, setCloudConnecting] = useState(false);
 
   const [selectedCatId, setSelectedCatId] = useState<string>(
     appData.categories[0]?.id || 'soccer-match'
@@ -114,17 +135,19 @@ export const AdminModal: React.FC<AdminModalProps> = ({
   const [selectedLbId, setSelectedLbId] = useState<string>(
     appData.leaderboards[0]?.id || 'lb-overall'
   );
-  const [confirmReset, setConfirmReset] = useState(false);
 
-  // Master password rotation state
+  // Master password rotation & Cloud Organizers state
   const [newAdminPwd, setNewAdminPwd] = useState('');
   const [confirmAdminPwd, setConfirmAdminPwd] = useState('');
   const [pwdUpdating, setPwdUpdating] = useState(false);
   const [pwdFeedback, setPwdFeedback] = useState<{ type: 'ok' | 'err'; msg: string } | null>(null);
+  const [cloudAdmins, setCloudAdmins] = useState<CloudAdminRecord[]>([]);
+  const [newOrganizerUid, setNewOrganizerUid] = useState('');
+  const [newOrganizerLabel, setNewOrganizerLabel] = useState('');
+  const [organizerMsg, setOrganizerMsg] = useState('');
 
   const isMaster = authRole === 'master';
   const canDelete = isMaster || appData.adminPanelConfig.allowDeleteItems;
-  const canReset = isMaster || appData.adminPanelConfig.allowResetDefaults;
 
   const availableTabs = useMemo(() => {
     const base: { id: ModalTab; label: string; icon: React.ComponentType<{ className?: string }> }[] = [
@@ -153,7 +176,6 @@ export const AdminModal: React.FC<AdminModalProps> = ({
       setHasUnsavedChanges(false);
       setAuthError('');
       setActionError('');
-      setConfirmReset(false);
       setPwdFeedback(null);
     }
   }, [isOpen, appData]);
@@ -165,6 +187,16 @@ export const AdminModal: React.FC<AdminModalProps> = ({
       }
     }
   }, [isUnlocked, availableTabs, activeTab]);
+
+  useEffect(() => {
+    if (isOpen && isUnlocked && isMaster && isCloudMaster) {
+      listCloudAdmins()
+        .then(setCloudAdmins)
+        .catch(() => setCloudAdmins([]));
+    } else {
+      setCloudAdmins([]);
+    }
+  }, [isOpen, isUnlocked, isMaster, isCloudMaster]);
 
   if (!isOpen) return null;
 
@@ -190,13 +222,14 @@ export const AdminModal: React.FC<AdminModalProps> = ({
         ok?: boolean;
         role?: AuthRole;
         token?: string;
+        passwordVersion?: number;
         error?: string;
       } | null;
       if (res.ok && payload?.ok && payload.token && payload.role) {
         onPlaySound('unlock');
         setPasswordInput('');
         setActiveTab(payload.role === 'master' ? 'master' : availableTabs[0]?.id || 'site');
-        onUnlockSuccess(payload.role, payload.token);
+        onUnlockSuccess(payload.role, payload.token, payload.passwordVersion);
       } else {
         onPlaySound('error');
         if (!payload || (res.status !== 401 && res.status !== 403 && !payload.error)) {
@@ -218,6 +251,19 @@ export const AdminModal: React.FC<AdminModalProps> = ({
     }
   };
 
+  const handleConnectGoogle = async () => {
+    setActionError('');
+    setCloudConnecting(true);
+    const res = await onConnectGoogleSync();
+    setCloudConnecting(false);
+    if (res.ok) {
+      onPlaySound('unlock');
+    } else {
+      onPlaySound('error');
+      if (res.error) setActionError(res.error);
+    }
+  };
+
   const handlePublish = async () => {
     setActionError('');
     const result = await onSaveData(draft, sessionToken);
@@ -227,6 +273,36 @@ export const AdminModal: React.FC<AdminModalProps> = ({
     } else {
       onPlaySound('error');
       setActionError(result.error || 'Could not publish changes.');
+    }
+  };
+
+  const handleAddOrganizer = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setOrganizerMsg('');
+    if (!newOrganizerUid.trim()) return;
+    try {
+      await addCloudAdmin(newOrganizerUid.trim(), newOrganizerLabel.trim() || 'Committee Admin');
+      const updated = await listCloudAdmins();
+      setCloudAdmins(updated);
+      setNewOrganizerUid('');
+      setNewOrganizerLabel('');
+      setOrganizerMsg('Organizer UID authorized for cross-device publishing.');
+      onPlaySound('chime');
+    } catch (err) {
+      onPlaySound('error');
+      setOrganizerMsg(err instanceof Error ? err.message : 'Failed to authorize UID.');
+    }
+  };
+
+  const handleRemoveOrganizer = async (uid: string) => {
+    setOrganizerMsg('');
+    try {
+      await removeCloudAdmin(uid);
+      setCloudAdmins((prev) => prev.filter((item) => item.uid !== uid));
+      onPlaySound('tap');
+    } catch (err) {
+      onPlaySound('error');
+      setOrganizerMsg(err instanceof Error ? err.message : 'Failed to remove organizer.');
     }
   };
 
@@ -252,7 +328,9 @@ export const AdminModal: React.FC<AdminModalProps> = ({
       setConfirmAdminPwd('');
       setPwdFeedback({
         type: 'ok',
-        msg: 'Admin password updated! Previous admin sessions have been invalidated.',
+        msg: res.syncedToCloud
+          ? 'Admin password updated across all devices! The old password is now invalid.'
+          : res.warning || 'Admin password updated on this server! Previous admin sessions have been invalidated.',
       });
     } else {
       onPlaySound('error');
@@ -978,48 +1056,6 @@ export const AdminModal: React.FC<AdminModalProps> = ({
           </div>
 
           <div className="flex items-center gap-2.5">
-            {canReset && (
-              <>
-                {!confirmReset ? (
-                  <button
-                    type="button"
-                    onClick={() => setConfirmReset(true)}
-                    className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-medium rounded-lg border border-stone-200 dark:border-stone-800 text-stone-600 dark:text-stone-400 hover:bg-stone-100 dark:hover:bg-stone-800 cursor-pointer"
-                  >
-                    <RotateCcw className="w-3.5 h-3.5" />
-                    <span className="hidden sm:inline">Reset Defaults</span>
-                  </button>
-                ) : (
-                  <div className="inline-flex items-center gap-1.5 bg-red-50 dark:bg-red-950/50 border border-red-200 dark:border-red-900 px-2.5 py-1.5 rounded-lg text-xs">
-                    <span className="text-red-700 dark:text-red-300">Confirm reset?</span>
-                    <button
-                      type="button"
-                      onClick={async () => {
-                        const res = await onResetDefault(sessionToken);
-                        setConfirmReset(false);
-                        if (res.ok) {
-                          onPlaySound('chime');
-                        } else {
-                          onPlaySound('error');
-                          setActionError(res.error || 'Reset failed.');
-                        }
-                      }}
-                      className="px-2 py-0.5 rounded bg-red-600 text-white font-medium cursor-pointer"
-                    >
-                      Yes
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setConfirmReset(false)}
-                      className="px-2 py-0.5 rounded text-stone-600 dark:text-stone-300 cursor-pointer"
-                    >
-                      No
-                    </button>
-                  </div>
-                )}
-              </>
-            )}
-
             <button
               type="button"
               onClick={() => {
@@ -1052,15 +1088,81 @@ export const AdminModal: React.FC<AdminModalProps> = ({
           </div>
         </div>
 
+        {/* Cross-Device Cloud Firestore Sync Bar */}
+        <div
+          className={`px-5 sm:px-7 py-2.5 border-b text-xs flex flex-wrap items-center justify-between gap-2 shrink-0 ${
+            cloudUser && cloudAuthorized
+              ? 'bg-emerald-50/80 dark:bg-emerald-950/30 border-emerald-200/80 dark:border-emerald-900/60 text-emerald-800 dark:text-emerald-300'
+              : 'bg-amber-50/90 dark:bg-amber-950/35 border-amber-200/80 dark:border-amber-900/60 text-amber-900 dark:text-amber-200'
+          }`}
+        >
+          <div className="flex items-center gap-2 min-w-0">
+            {cloudUser && cloudAuthorized ? (
+              <>
+                <Cloud className="w-3.5 h-3.5 shrink-0" />
+                <span className="truncate">
+                  Cross-Device Cloud Sync active ({cloudUser.email})
+                  {!hasCloudDocument ? ' · Click Save Changes to publish initial cloud state' : ' · Synced to all devices'}
+                </span>
+              </>
+            ) : cloudUser && !cloudAuthorized ? (
+              <>
+                <CloudOff className="w-3.5 h-3.5 shrink-0" />
+                <span className="truncate">
+                  Signed in as {cloudUser.email} (UID: <code className="font-mono">{cloudUser.uid}</code>) — not authorized yet. Use {MASTER_EMAIL} or have Master add this UID.
+                </span>
+              </>
+            ) : (
+              <>
+                <CloudOff className="w-3.5 h-3.5 shrink-0" />
+                <span>
+                  Connect Google ({MASTER_EMAIL}) to publish edits across all devices &amp; browsers.
+                </span>
+              </>
+            )}
+          </div>
+
+          <div className="flex items-center gap-2 shrink-0">
+            {cloudUser ? (
+              <button
+                type="button"
+                onClick={handleConnectGoogle}
+                disabled={cloudConnecting}
+                className="px-2.5 py-1 rounded-md border border-current/25 hover:bg-black/5 dark:hover:bg-white/10 font-medium cursor-pointer"
+              >
+                {cloudConnecting ? 'Switching...' : 'Switch Google'}
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={handleConnectGoogle}
+                disabled={cloudConnecting}
+                className="px-3 py-1 rounded-md bg-stone-900 text-stone-50 dark:bg-stone-100 dark:text-stone-900 font-medium cursor-pointer"
+              >
+                {cloudConnecting ? 'Connecting...' : 'Connect Google Sync'}
+              </button>
+            )}
+            {cloudUser && (
+              <button
+                type="button"
+                onClick={() => onDisconnectGoogleSync()}
+                className="underline opacity-80 hover:opacity-100 cursor-pointer"
+              >
+                Sign out
+              </button>
+            )}
+          </div>
+        </div>
+
         {actionError && (
-          <div className="px-5 sm:px-7 py-2.5 bg-red-50 dark:bg-red-950/60 border-b border-red-200 dark:border-red-900 text-xs text-red-700 dark:text-red-300 flex items-center justify-between">
+          <div className="px-5 sm:px-7 py-2.5 bg-red-50 dark:bg-red-950/60 border-b border-red-200 dark:border-red-900 text-xs text-red-700 dark:text-red-300 flex items-center justify-between gap-3">
             <span>{actionError}</span>
             <button
               type="button"
               onClick={() => {
                 onLockAdmin();
               }}
-              className="underline font-medium cursor-pointer ml-4"
+              className="underline font-medium cursor-pointer shrink-0"
             >
               Re-unlock Session
             </button>
@@ -1266,18 +1368,100 @@ export const AdminModal: React.FC<AdminModalProps> = ({
                     />
                     <span>Allow Standard Admin to delete notices, categories, matches &amp; teams</span>
                   </label>
-                  <label className="inline-flex items-center gap-2 cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={draft.adminPanelConfig.allowResetDefaults}
-                      onChange={(e) =>
-                        handleUpdateAdminPanelConfig({ allowResetDefaults: e.target.checked })
-                      }
-                      className="accent-[var(--accent-primary)]"
-                    />
-                    <span>Allow Standard Admin to use &ldquo;Reset Defaults&rdquo;</span>
-                  </label>
                 </div>
+              </div>
+
+              {/* 3. Cross-Device Cloud Organizers (Master Google Auth) */}
+              <div className="rounded-xl bg-white dark:bg-[#1C1917] border border-stone-200 dark:border-stone-800 p-5 space-y-4">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="flex items-start gap-3">
+                    <div className="w-9 h-9 rounded-lg bg-emerald-500/15 text-emerald-700 dark:text-emerald-400 flex items-center justify-center shrink-0">
+                      <UserPlus className="w-4 h-4" />
+                    </div>
+                    <div>
+                      <h3 className="font-serif text-base font-semibold">
+                        Cross-Device Cloud Organizers
+                      </h3>
+                      <p className="text-xs text-stone-500 dark:text-stone-400">
+                        Master ({MASTER_EMAIL}) can publish from any device automatically. Add committee UIDs below if other organizers use their own Google account.
+                      </p>
+                    </div>
+                  </div>
+                </div>
+
+                {!isCloudMaster ? (
+                  <div className="p-3.5 rounded-lg bg-stone-50 dark:bg-stone-900 border border-stone-200 dark:border-stone-800 flex flex-wrap items-center justify-between gap-3 text-xs">
+                    <span className="text-stone-600 dark:text-stone-400">
+                      Sign in with <strong>{MASTER_EMAIL}</strong> to view or manage committee Cloud Sync UIDs.
+                    </span>
+                    <button
+                      type="button"
+                      onClick={handleConnectGoogle}
+                      disabled={cloudConnecting}
+                      className="px-3 py-1.5 rounded-lg bg-stone-900 text-stone-50 dark:bg-stone-100 dark:text-stone-900 font-medium cursor-pointer"
+                    >
+                      {cloudConnecting ? 'Connecting...' : 'Sign In as Master Google'}
+                    </button>
+                  </div>
+                ) : (
+                  <div className="space-y-4">
+                    <form onSubmit={handleAddOrganizer} className="grid grid-cols-1 md:grid-cols-5 gap-3 items-end">
+                      <div className="md:col-span-2">
+                        <label className="block text-xs text-stone-500 mb-1">Organizer Firebase UID</label>
+                        <input
+                          type="text"
+                          value={newOrganizerUid}
+                          onChange={(e) => setNewOrganizerUid(e.target.value)}
+                          placeholder="Paste organizer UID..."
+                          className="w-full px-3 py-2 text-xs font-mono rounded-lg bg-stone-50 dark:bg-stone-900 border border-stone-200 dark:border-stone-800"
+                        />
+                      </div>
+                      <div className="md:col-span-2">
+                        <label className="block text-xs text-stone-500 mb-1">Committee Label</label>
+                        <input
+                          type="text"
+                          value={newOrganizerLabel}
+                          onChange={(e) => setNewOrganizerLabel(e.target.value)}
+                          placeholder="e.g. Secretary / Bracket Lead"
+                          className="w-full px-3 py-2 text-xs rounded-lg bg-stone-50 dark:bg-stone-900 border border-stone-200 dark:border-stone-800"
+                        />
+                      </div>
+                      <div>
+                        <button
+                          type="submit"
+                          disabled={!newOrganizerUid.trim()}
+                          className="w-full px-3.5 py-2 text-xs font-semibold rounded-lg bg-stone-900 text-stone-50 dark:bg-stone-100 dark:text-stone-900 disabled:opacity-45 cursor-pointer"
+                        >
+                          Authorize UID
+                        </button>
+                      </div>
+                    </form>
+
+                    {organizerMsg && (
+                      <p className="text-xs text-emerald-700 dark:text-emerald-400">{organizerMsg}</p>
+                    )}
+
+                    {cloudAdmins.length > 0 && (
+                      <div className="divide-y divide-stone-100 dark:divide-stone-800 rounded-lg border border-stone-200 dark:border-stone-800">
+                        {cloudAdmins.map((adm) => (
+                          <div key={adm.uid} className="px-3.5 py-2.5 flex items-center justify-between gap-3 text-xs">
+                            <div>
+                              <p className="font-medium text-stone-900 dark:text-stone-100">{adm.label}</p>
+                              <p className="font-mono text-[11px] text-stone-500">{adm.uid}</p>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => handleRemoveOrganizer(adm.uid)}
+                              className="text-red-600 dark:text-red-400 hover:underline cursor-pointer"
+                            >
+                              Revoke
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
             </div>
           )}
@@ -1551,6 +1735,32 @@ export const AdminModal: React.FC<AdminModalProps> = ({
                     </div>
                   </div>
                 </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
+                  <div>
+                    <label className="block text-[11px] text-stone-500 mb-1">
+                      Sessions Count Label (Home Card 1 Footer)
+                    </label>
+                    <input
+                      type="text"
+                      value={draft.siteCopy.homeSessionsCountLabel}
+                      onChange={(e) =>
+                        handleUpdateSiteCopy({ homeSessionsCountLabel: e.target.value })
+                      }
+                      className="w-full px-2.5 py-1.5 text-xs rounded-lg bg-stone-50 dark:bg-stone-900 border border-stone-200 dark:border-stone-800"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[11px] text-stone-500 mb-1">
+                      Match Separator Label (e.g. &ldquo;vs&rdquo;)
+                    </label>
+                    <input
+                      type="text"
+                      value={draft.siteCopy.homeVersusLabel}
+                      onChange={(e) => handleUpdateSiteCopy({ homeVersusLabel: e.target.value })}
+                      className="w-full px-2.5 py-1.5 text-xs rounded-lg bg-stone-50 dark:bg-stone-900 border border-stone-200 dark:border-stone-800"
+                    />
+                  </div>
+                </div>
               </div>
 
               {/* Dedicated Page Headers */}
@@ -1700,10 +1910,136 @@ export const AdminModal: React.FC<AdminModalProps> = ({
           {/* TAB 2: EVENT RUNDOWN & SCHEDULE */}
           {activeTab === 'announcements' && (
             <div className="space-y-6">
+              {/* Rundown Page Headline & UI Elements */}
+              <div className="rounded-xl bg-white dark:bg-[#1C1917] border border-stone-200 dark:border-stone-800 p-5 space-y-4">
+                <div>
+                  <h3 className="font-serif text-base font-semibold">
+                    Rundown Page Headline &amp; UI Elements
+                  </h3>
+                  <p className="text-xs text-stone-500 dark:text-stone-400">
+                    Edit the page eyebrow, headline, filters, badges, and button text displayed on the Rundown page
+                  </p>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs text-stone-500 mb-1">Page Eyebrow</label>
+                    <input
+                      type="text"
+                      value={draft.siteCopy.announcementsEyebrow}
+                      onChange={(e) =>
+                        handleUpdateSiteCopy({ announcementsEyebrow: e.target.value })
+                      }
+                      className="w-full px-3 py-2 text-sm rounded-lg bg-stone-50 dark:bg-stone-900 border border-stone-200 dark:border-stone-800"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs text-stone-500 mb-1">Main Page Headline</label>
+                    <input
+                      type="text"
+                      value={draft.siteCopy.announcementsHeading}
+                      onChange={(e) =>
+                        handleUpdateSiteCopy({ announcementsHeading: e.target.value })
+                      }
+                      className="w-full px-3 py-2 text-sm rounded-lg bg-stone-50 dark:bg-stone-900 border border-stone-200 dark:border-stone-800"
+                    />
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                  <div>
+                    <label className="block text-[11px] text-stone-500 mb-1">Featured Badge</label>
+                    <input
+                      type="text"
+                      value={draft.siteCopy.rundownFeaturedBadge}
+                      onChange={(e) =>
+                        handleUpdateSiteCopy({ rundownFeaturedBadge: e.target.value })
+                      }
+                      className="w-full px-2.5 py-1.5 text-xs rounded-lg bg-stone-50 dark:bg-stone-900 border border-stone-200 dark:border-stone-800"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[11px] text-stone-500 mb-1">All Days Filter</label>
+                    <input
+                      type="text"
+                      value={draft.siteCopy.rundownAllDaysLabel}
+                      onChange={(e) =>
+                        handleUpdateSiteCopy({ rundownAllDaysLabel: e.target.value })
+                      }
+                      className="w-full px-2.5 py-1.5 text-xs rounded-lg bg-stone-50 dark:bg-stone-900 border border-stone-200 dark:border-stone-800"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[11px] text-stone-500 mb-1">All Categories</label>
+                    <input
+                      type="text"
+                      value={draft.siteCopy.rundownAllCategoriesLabel}
+                      onChange={(e) =>
+                        handleUpdateSiteCopy({ rundownAllCategoriesLabel: e.target.value })
+                      }
+                      className="w-full px-2.5 py-1.5 text-xs rounded-lg bg-stone-50 dark:bg-stone-900 border border-stone-200 dark:border-stone-800"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[11px] text-stone-500 mb-1">Coordinator Prefix</label>
+                    <input
+                      type="text"
+                      value={draft.siteCopy.rundownCoordinatorLabel}
+                      onChange={(e) =>
+                        handleUpdateSiteCopy({ rundownCoordinatorLabel: e.target.value })
+                      }
+                      className="w-full px-2.5 py-1.5 text-xs rounded-lg bg-stone-50 dark:bg-stone-900 border border-stone-200 dark:border-stone-800"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[11px] text-stone-500 mb-1">Search Placeholder</label>
+                    <input
+                      type="text"
+                      value={draft.siteCopy.rundownSearchPlaceholder}
+                      onChange={(e) =>
+                        handleUpdateSiteCopy({ rundownSearchPlaceholder: e.target.value })
+                      }
+                      className="w-full px-2.5 py-1.5 text-xs rounded-lg bg-stone-50 dark:bg-stone-900 border border-stone-200 dark:border-stone-800"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[11px] text-stone-500 mb-1">Expand Button</label>
+                    <input
+                      type="text"
+                      value={draft.siteCopy.rundownShowDetailsLabel}
+                      onChange={(e) =>
+                        handleUpdateSiteCopy({ rundownShowDetailsLabel: e.target.value })
+                      }
+                      className="w-full px-2.5 py-1.5 text-xs rounded-lg bg-stone-50 dark:bg-stone-900 border border-stone-200 dark:border-stone-800"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[11px] text-stone-500 mb-1">Collapse Button</label>
+                    <input
+                      type="text"
+                      value={draft.siteCopy.rundownHideDetailsLabel}
+                      onChange={(e) =>
+                        handleUpdateSiteCopy({ rundownHideDetailsLabel: e.target.value })
+                      }
+                      className="w-full px-2.5 py-1.5 text-xs rounded-lg bg-stone-50 dark:bg-stone-900 border border-stone-200 dark:border-stone-800"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[11px] text-stone-500 mb-1">Reset Filter Button</label>
+                    <input
+                      type="text"
+                      value={draft.siteCopy.rundownResetFilterLabel}
+                      onChange={(e) =>
+                        handleUpdateSiteCopy({ rundownResetFilterLabel: e.target.value })
+                      }
+                      className="w-full px-2.5 py-1.5 text-xs rounded-lg bg-stone-50 dark:bg-stone-900 border border-stone-200 dark:border-stone-800"
+                    />
+                  </div>
+                </div>
+              </div>
+
               <div className="flex items-center justify-between">
                 <div>
                   <h3 className="font-serif text-lg font-semibold">
-                    Event Rundown & Schedule ({draft.announcements.length})
+                    Event Rundown &amp; Schedule ({draft.announcements.length})
                   </h3>
                   <p className="text-xs text-stone-500 dark:text-stone-400">
                     Create, pin on Home Rundown card, or edit daily schedule slots
@@ -1910,6 +2246,228 @@ export const AdminModal: React.FC<AdminModalProps> = ({
           {/* TAB 3: BRACKETS, UPCOMING MATCHES & MATCH EVENTS */}
           {activeTab === 'brackets' && activeCat && (
             <div className="space-y-6">
+              {/* Match Result Page Headline & UI Elements */}
+              <div className="rounded-xl bg-white dark:bg-[#1C1917] border border-stone-200 dark:border-stone-800 p-5 space-y-4">
+                <div>
+                  <h3 className="font-serif text-base font-semibold">
+                    Match Result Page Headline, Bracket &amp; UI Elements
+                  </h3>
+                  <p className="text-xs text-stone-500 dark:text-stone-400">
+                    Edit the page eyebrow, headline, view tabs, section titles, and bracket column headers
+                  </p>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs text-stone-500 mb-1">Page Eyebrow</label>
+                    <input
+                      type="text"
+                      value={draft.siteCopy.competitionsEyebrow}
+                      onChange={(e) =>
+                        handleUpdateSiteCopy({ competitionsEyebrow: e.target.value })
+                      }
+                      className="w-full px-3 py-2 text-sm rounded-lg bg-stone-50 dark:bg-stone-900 border border-stone-200 dark:border-stone-800"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs text-stone-500 mb-1">Main Page Headline</label>
+                    <input
+                      type="text"
+                      value={draft.siteCopy.competitionsHeading}
+                      onChange={(e) =>
+                        handleUpdateSiteCopy({ competitionsHeading: e.target.value })
+                      }
+                      className="w-full px-3 py-2 text-sm rounded-lg bg-stone-50 dark:bg-stone-900 border border-stone-200 dark:border-stone-800"
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                  <div>
+                    <label className="block text-[11px] text-stone-500 mb-1">Tab: Full View</label>
+                    <input
+                      type="text"
+                      value={draft.siteCopy.matchResultTabAllLabel}
+                      onChange={(e) =>
+                        handleUpdateSiteCopy({ matchResultTabAllLabel: e.target.value })
+                      }
+                      className="w-full px-2.5 py-1.5 text-xs rounded-lg bg-stone-50 dark:bg-stone-900 border border-stone-200 dark:border-stone-800"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[11px] text-stone-500 mb-1">Tab: Results</label>
+                    <input
+                      type="text"
+                      value={draft.siteCopy.matchResultTabResultsLabel}
+                      onChange={(e) =>
+                        handleUpdateSiteCopy({ matchResultTabResultsLabel: e.target.value })
+                      }
+                      className="w-full px-2.5 py-1.5 text-xs rounded-lg bg-stone-50 dark:bg-stone-900 border border-stone-200 dark:border-stone-800"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[11px] text-stone-500 mb-1">Tab: Bracket</label>
+                    <input
+                      type="text"
+                      value={draft.siteCopy.matchResultTabBracketLabel}
+                      onChange={(e) =>
+                        handleUpdateSiteCopy({ matchResultTabBracketLabel: e.target.value })
+                      }
+                      className="w-full px-2.5 py-1.5 text-xs rounded-lg bg-stone-50 dark:bg-stone-900 border border-stone-200 dark:border-stone-800"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[11px] text-stone-500 mb-1">Tab: Upcoming</label>
+                    <input
+                      type="text"
+                      value={draft.siteCopy.matchResultTabUpcomingLabel}
+                      onChange={(e) =>
+                        handleUpdateSiteCopy({ matchResultTabUpcomingLabel: e.target.value })
+                      }
+                      className="w-full px-2.5 py-1.5 text-xs rounded-lg bg-stone-50 dark:bg-stone-900 border border-stone-200 dark:border-stone-800"
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                  <div>
+                    <label className="block text-[11px] text-stone-500 mb-1">Results Section Title</label>
+                    <input
+                      type="text"
+                      value={draft.siteCopy.matchResultResultsTitle}
+                      onChange={(e) =>
+                        handleUpdateSiteCopy({ matchResultResultsTitle: e.target.value })
+                      }
+                      className="w-full px-2.5 py-1.5 text-xs rounded-lg bg-stone-50 dark:bg-stone-900 border border-stone-200 dark:border-stone-800"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[11px] text-stone-500 mb-1">Bracket Section Title</label>
+                    <input
+                      type="text"
+                      value={draft.siteCopy.matchResultBracketTitle}
+                      onChange={(e) =>
+                        handleUpdateSiteCopy({ matchResultBracketTitle: e.target.value })
+                      }
+                      className="w-full px-2.5 py-1.5 text-xs rounded-lg bg-stone-50 dark:bg-stone-900 border border-stone-200 dark:border-stone-800"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[11px] text-stone-500 mb-1">Upcoming Section Title</label>
+                    <input
+                      type="text"
+                      value={draft.siteCopy.matchResultUpcomingTitle}
+                      onChange={(e) =>
+                        handleUpdateSiteCopy({ matchResultUpcomingTitle: e.target.value })
+                      }
+                      className="w-full px-2.5 py-1.5 text-xs rounded-lg bg-stone-50 dark:bg-stone-900 border border-stone-200 dark:border-stone-800"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[11px] text-stone-500 mb-1">Card Breakdown Link</label>
+                    <input
+                      type="text"
+                      value={draft.siteCopy.matchResultBreakdownButtonLabel}
+                      onChange={(e) =>
+                        handleUpdateSiteCopy({ matchResultBreakdownButtonLabel: e.target.value })
+                      }
+                      className="w-full px-2.5 py-1.5 text-xs rounded-lg bg-stone-50 dark:bg-stone-900 border border-stone-200 dark:border-stone-800"
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+                  <div>
+                    <label className="block text-[11px] text-stone-500 mb-1">Bracket Col: Qual</label>
+                    <input
+                      type="text"
+                      value={draft.siteCopy.bracketColQualifying}
+                      onChange={(e) =>
+                        handleUpdateSiteCopy({ bracketColQualifying: e.target.value })
+                      }
+                      className="w-full px-2.5 py-1.5 text-xs rounded-lg bg-stone-50 dark:bg-stone-900 border border-stone-200 dark:border-stone-800"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[11px] text-stone-500 mb-1">Bracket Col: QF</label>
+                    <input
+                      type="text"
+                      value={draft.siteCopy.bracketColQuarterfinals}
+                      onChange={(e) =>
+                        handleUpdateSiteCopy({ bracketColQuarterfinals: e.target.value })
+                      }
+                      className="w-full px-2.5 py-1.5 text-xs rounded-lg bg-stone-50 dark:bg-stone-900 border border-stone-200 dark:border-stone-800"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[11px] text-stone-500 mb-1">Bracket Col: SF</label>
+                    <input
+                      type="text"
+                      value={draft.siteCopy.bracketColSemifinals}
+                      onChange={(e) =>
+                        handleUpdateSiteCopy({ bracketColSemifinals: e.target.value })
+                      }
+                      className="w-full px-2.5 py-1.5 text-xs rounded-lg bg-stone-50 dark:bg-stone-900 border border-stone-200 dark:border-stone-800"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[11px] text-stone-500 mb-1">Bracket Col: Final</label>
+                    <input
+                      type="text"
+                      value={draft.siteCopy.bracketColFinal}
+                      onChange={(e) => handleUpdateSiteCopy({ bracketColFinal: e.target.value })}
+                      className="w-full px-2.5 py-1.5 text-xs rounded-lg bg-stone-50 dark:bg-stone-900 border border-stone-200 dark:border-stone-800"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[11px] text-stone-500 mb-1">Title Match Tag</label>
+                    <input
+                      type="text"
+                      value={draft.siteCopy.bracketTitleMatchTag}
+                      onChange={(e) =>
+                        handleUpdateSiteCopy({ bracketTitleMatchTag: e.target.value })
+                      }
+                      className="w-full px-2.5 py-1.5 text-xs rounded-lg bg-stone-50 dark:bg-stone-900 border border-stone-200 dark:border-stone-800"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[11px] text-stone-500 mb-1">Champion Box Title</label>
+                    <input
+                      type="text"
+                      value={draft.siteCopy.bracketChampionLabel}
+                      onChange={(e) =>
+                        handleUpdateSiteCopy({ bracketChampionLabel: e.target.value })
+                      }
+                      className="w-full px-2.5 py-1.5 text-xs rounded-lg bg-stone-50 dark:bg-stone-900 border border-stone-200 dark:border-stone-800"
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-[11px] text-stone-500 mb-1">Bracket Subtitle</label>
+                    <input
+                      type="text"
+                      value={draft.siteCopy.matchResultBracketSubtitle}
+                      onChange={(e) =>
+                        handleUpdateSiteCopy({ matchResultBracketSubtitle: e.target.value })
+                      }
+                      className="w-full px-2.5 py-1.5 text-xs rounded-lg bg-stone-50 dark:bg-stone-900 border border-stone-200 dark:border-stone-800"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[11px] text-stone-500 mb-1">Bracket Helper Caption</label>
+                    <input
+                      type="text"
+                      value={draft.siteCopy.bracketHelperNote}
+                      onChange={(e) =>
+                        handleUpdateSiteCopy({ bracketHelperNote: e.target.value })
+                      }
+                      className="w-full px-2.5 py-1.5 text-xs rounded-lg bg-stone-50 dark:bg-stone-900 border border-stone-200 dark:border-stone-800"
+                    />
+                  </div>
+                </div>
+              </div>
+
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <div className="flex items-center gap-2 overflow-x-auto pb-1">
                   {draft.categories.map((cat) => (
@@ -2449,6 +3007,221 @@ export const AdminModal: React.FC<AdminModalProps> = ({
           {/* TAB 4: LEADERBOARDS */}
           {activeTab === 'leaderboards' && activeLb && (
             <div className="space-y-6">
+              {/* Leaderboard Page Headline, Search, Sort & Column Headers */}
+              <div className="rounded-xl bg-white dark:bg-[#1C1917] border border-stone-200 dark:border-stone-800 p-5 space-y-4">
+                <div>
+                  <h3 className="font-serif text-base font-semibold">
+                    Leaderboard Page Headline &amp; UI Elements
+                  </h3>
+                  <p className="text-xs text-stone-500 dark:text-stone-400">
+                    Edit the Leaderboard eyebrow, main headline, filter/sort bar, and table column headers
+                  </p>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs text-stone-500 mb-1">
+                      Page Eyebrow (Top Label)
+                    </label>
+                    <input
+                      type="text"
+                      value={draft.siteCopy.leaderboardEyebrow}
+                      onChange={(e) =>
+                        handleUpdateSiteCopy({ leaderboardEyebrow: e.target.value })
+                      }
+                      className="w-full px-3 py-2 text-sm rounded-lg bg-stone-50 dark:bg-stone-900 border border-stone-200 dark:border-stone-800"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs text-stone-500 mb-1">
+                      Main Page Headline (H1)
+                    </label>
+                    <input
+                      type="text"
+                      value={draft.siteCopy.leaderboardHeading}
+                      onChange={(e) =>
+                        handleUpdateSiteCopy({ leaderboardHeading: e.target.value })
+                      }
+                      className="w-full px-3 py-2 text-sm rounded-lg bg-stone-50 dark:bg-stone-900 border border-stone-200 dark:border-stone-800"
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
+                  <div className="col-span-2 sm:col-span-1">
+                    <label className="block text-[11px] text-stone-500 mb-1">Search Placeholder</label>
+                    <input
+                      type="text"
+                      value={draft.siteCopy.leaderboardSearchPlaceholder}
+                      onChange={(e) =>
+                        handleUpdateSiteCopy({ leaderboardSearchPlaceholder: e.target.value })
+                      }
+                      className="w-full px-2.5 py-1.5 text-xs rounded-lg bg-stone-50 dark:bg-stone-900 border border-stone-200 dark:border-stone-800"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[11px] text-stone-500 mb-1">Sort Prefix</label>
+                    <input
+                      type="text"
+                      value={draft.siteCopy.leaderboardSortLabel}
+                      onChange={(e) =>
+                        handleUpdateSiteCopy({ leaderboardSortLabel: e.target.value })
+                      }
+                      className="w-full px-2.5 py-1.5 text-xs rounded-lg bg-stone-50 dark:bg-stone-900 border border-stone-200 dark:border-stone-800"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[11px] text-stone-500 mb-1">Sort: Points</label>
+                    <input
+                      type="text"
+                      value={draft.siteCopy.leaderboardSortPointsLabel}
+                      onChange={(e) =>
+                        handleUpdateSiteCopy({ leaderboardSortPointsLabel: e.target.value })
+                      }
+                      className="w-full px-2.5 py-1.5 text-xs rounded-lg bg-stone-50 dark:bg-stone-900 border border-stone-200 dark:border-stone-800"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[11px] text-stone-500 mb-1">Sort: Wins</label>
+                    <input
+                      type="text"
+                      value={draft.siteCopy.leaderboardSortWinsLabel}
+                      onChange={(e) =>
+                        handleUpdateSiteCopy({ leaderboardSortWinsLabel: e.target.value })
+                      }
+                      className="w-full px-2.5 py-1.5 text-xs rounded-lg bg-stone-50 dark:bg-stone-900 border border-stone-200 dark:border-stone-800"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[11px] text-stone-500 mb-1">Sort: Played</label>
+                    <input
+                      type="text"
+                      value={draft.siteCopy.leaderboardSortPlayedLabel}
+                      onChange={(e) =>
+                        handleUpdateSiteCopy({ leaderboardSortPlayedLabel: e.target.value })
+                      }
+                      className="w-full px-2.5 py-1.5 text-xs rounded-lg bg-stone-50 dark:bg-stone-900 border border-stone-200 dark:border-stone-800"
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-3 sm:grid-cols-5 lg:grid-cols-9 gap-2.5">
+                  <div>
+                    <label className="block text-[11px] text-stone-500 mb-1">Col: Rank</label>
+                    <input
+                      type="text"
+                      value={draft.siteCopy.leaderboardColRank}
+                      onChange={(e) =>
+                        handleUpdateSiteCopy({ leaderboardColRank: e.target.value })
+                      }
+                      className="w-full px-2.5 py-1.5 text-xs rounded-lg bg-stone-50 dark:bg-stone-900 border border-stone-200 dark:border-stone-800"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[11px] text-stone-500 mb-1">Col: Contender</label>
+                    <input
+                      type="text"
+                      value={draft.siteCopy.leaderboardColContender}
+                      onChange={(e) =>
+                        handleUpdateSiteCopy({ leaderboardColContender: e.target.value })
+                      }
+                      className="w-full px-2.5 py-1.5 text-xs rounded-lg bg-stone-50 dark:bg-stone-900 border border-stone-200 dark:border-stone-800"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[11px] text-stone-500 mb-1">Col: Played</label>
+                    <input
+                      type="text"
+                      value={draft.siteCopy.leaderboardColPlayed}
+                      onChange={(e) =>
+                        handleUpdateSiteCopy({ leaderboardColPlayed: e.target.value })
+                      }
+                      className="w-full px-2.5 py-1.5 text-xs rounded-lg bg-stone-50 dark:bg-stone-900 border border-stone-200 dark:border-stone-800"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[11px] text-stone-500 mb-1">Col: Gold</label>
+                    <input
+                      type="text"
+                      value={draft.siteCopy.leaderboardColGold}
+                      onChange={(e) =>
+                        handleUpdateSiteCopy({ leaderboardColGold: e.target.value })
+                      }
+                      className="w-full px-2.5 py-1.5 text-xs rounded-lg bg-stone-50 dark:bg-stone-900 border border-stone-200 dark:border-stone-800"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[11px] text-stone-500 mb-1">Col: Silver</label>
+                    <input
+                      type="text"
+                      value={draft.siteCopy.leaderboardColSilver}
+                      onChange={(e) =>
+                        handleUpdateSiteCopy({ leaderboardColSilver: e.target.value })
+                      }
+                      className="w-full px-2.5 py-1.5 text-xs rounded-lg bg-stone-50 dark:bg-stone-900 border border-stone-200 dark:border-stone-800"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[11px] text-stone-500 mb-1">Col: Bronze</label>
+                    <input
+                      type="text"
+                      value={draft.siteCopy.leaderboardColBronze}
+                      onChange={(e) =>
+                        handleUpdateSiteCopy({ leaderboardColBronze: e.target.value })
+                      }
+                      className="w-full px-2.5 py-1.5 text-xs rounded-lg bg-stone-50 dark:bg-stone-900 border border-stone-200 dark:border-stone-800"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[11px] text-stone-500 mb-1">Col: Won</label>
+                    <input
+                      type="text"
+                      value={draft.siteCopy.leaderboardColWon}
+                      onChange={(e) =>
+                        handleUpdateSiteCopy({ leaderboardColWon: e.target.value })
+                      }
+                      className="w-full px-2.5 py-1.5 text-xs rounded-lg bg-stone-50 dark:bg-stone-900 border border-stone-200 dark:border-stone-800"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[11px] text-stone-500 mb-1">Col: Drawn</label>
+                    <input
+                      type="text"
+                      value={draft.siteCopy.leaderboardColDrawn}
+                      onChange={(e) =>
+                        handleUpdateSiteCopy({ leaderboardColDrawn: e.target.value })
+                      }
+                      className="w-full px-2.5 py-1.5 text-xs rounded-lg bg-stone-50 dark:bg-stone-900 border border-stone-200 dark:border-stone-800"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[11px] text-stone-500 mb-1">Col: Lost</label>
+                    <input
+                      type="text"
+                      value={draft.siteCopy.leaderboardColLost}
+                      onChange={(e) =>
+                        handleUpdateSiteCopy({ leaderboardColLost: e.target.value })
+                      }
+                      className="w-full px-2.5 py-1.5 text-xs rounded-lg bg-stone-50 dark:bg-stone-900 border border-stone-200 dark:border-stone-800"
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-[11px] text-stone-500 mb-1">
+                    Empty Search Table Message
+                  </label>
+                  <input
+                    type="text"
+                    value={draft.siteCopy.leaderboardEmptyText}
+                    onChange={(e) =>
+                      handleUpdateSiteCopy({ leaderboardEmptyText: e.target.value })
+                    }
+                    className="w-full px-2.5 py-1.5 text-xs rounded-lg bg-stone-50 dark:bg-stone-900 border border-stone-200 dark:border-stone-800"
+                  />
+                </div>
+              </div>
+
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <div className="flex items-center gap-2 overflow-x-auto pb-1">
                   {draft.leaderboards.map((lb) => (

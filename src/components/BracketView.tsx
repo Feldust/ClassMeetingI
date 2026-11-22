@@ -10,11 +10,12 @@ import {
   UserCheck,
   Activity,
 } from 'lucide-react';
-import type { BracketMatch, Team } from '../types';
+import type { BracketMatch, SiteCopyConfig, Team } from '../types';
 
 interface BracketViewProps {
   matches: BracketMatch[];
   teams: Team[];
+  siteCopy?: Partial<SiteCopyConfig>;
   onSoundTap: () => void;
   onSelectMatch?: (match: BracketMatch) => void;
 }
@@ -22,9 +23,19 @@ interface BracketViewProps {
 export const BracketView: React.FC<BracketViewProps> = ({
   matches,
   teams,
+  siteCopy,
   onSoundTap,
   onSelectMatch,
 }) => {
+  const colQualifying = siteCopy?.bracketColQualifying || 'Qualifying Round';
+  const colQuarterfinals = siteCopy?.bracketColQuarterfinals || 'Quarterfinals';
+  const colSemifinals = siteCopy?.bracketColSemifinals || 'Semifinals';
+  const colFinal = siteCopy?.bracketColFinal || 'Championship Final';
+  const titleMatchTag = siteCopy?.bracketTitleMatchTag || 'Title Match';
+  const championLabel = siteCopy?.bracketChampionLabel || 'Tournament Champion';
+  const helperNote =
+    siteCopy?.bracketHelperNote ||
+    'Click any bracket fixture above to inspect scorers ("Goal by"), MVPs, referees, venues, and team captains.';
   const [internalSelectedMatch, setInternalSelectedMatch] = useState<BracketMatch | null>(null);
 
   const handleOpenMatch = (match: BracketMatch) => {
@@ -210,7 +221,7 @@ export const BracketView: React.FC<BracketViewProps> = ({
             <div className="flex flex-col justify-between gap-4">
               <div className="pb-2 border-b border-stone-200 dark:border-stone-800 flex items-center justify-between">
                 <h4 className="font-serif text-base font-medium text-stone-900 dark:text-stone-100">
-                  Qualifying Round
+                  {colQualifying}
                 </h4>
                 <span className="text-xs text-stone-500 dark:text-stone-400 font-mono tabular-nums">
                   {qualifying.length} {qualifying.length === 1 ? 'Match' : 'Matches'}
@@ -226,7 +237,7 @@ export const BracketView: React.FC<BracketViewProps> = ({
           <div className="flex flex-col justify-between gap-4">
             <div className="pb-2 border-b border-stone-200 dark:border-stone-800 flex items-center justify-between">
               <h4 className="font-serif text-base font-medium text-stone-900 dark:text-stone-100">
-                Quarterfinals
+                {colQuarterfinals}
               </h4>
               <span className="text-xs text-stone-500 dark:text-stone-400 font-mono tabular-nums">
                 {quarterfinals.length} Matches
@@ -241,7 +252,7 @@ export const BracketView: React.FC<BracketViewProps> = ({
           <div className="flex flex-col justify-between gap-4">
             <div className="pb-2 border-b border-stone-200 dark:border-stone-800 flex items-center justify-between">
               <h4 className="font-serif text-base font-medium text-stone-900 dark:text-stone-100">
-                Semifinals
+                {colSemifinals}
               </h4>
               <span className="text-xs text-stone-500 dark:text-stone-400 font-mono tabular-nums">
                 {semifinals.length} Matches
@@ -256,9 +267,9 @@ export const BracketView: React.FC<BracketViewProps> = ({
           <div className="flex flex-col justify-between gap-4">
             <div className="pb-2 border-b border-stone-200 dark:border-stone-800 flex items-center justify-between">
               <h4 className="font-serif text-base font-medium text-stone-900 dark:text-stone-100">
-                Championship Final
+                {colFinal}
               </h4>
-              <span className="text-xs text-stone-500 dark:text-stone-400">Title Match</span>
+              <span className="text-xs text-stone-500 dark:text-stone-400">{titleMatchTag}</span>
             </div>
             <div className="flex flex-col justify-center flex-1 gap-6">
               {finals.map((m) => renderMatchNode(m, 'Grand Final'))}
@@ -266,7 +277,7 @@ export const BracketView: React.FC<BracketViewProps> = ({
               <div className="rounded-xl bg-[#F5F1E8] dark:bg-stone-900/80 border border-stone-200/90 dark:border-stone-800 p-4">
                 <div className="flex items-center gap-2 text-xs text-stone-500 dark:text-stone-400 mb-1.5">
                   <Trophy className="w-3.5 h-3.5 text-[var(--accent-text)]" />
-                  <span>Tournament Champion</span>
+                  <span>{championLabel}</span>
                 </div>
                 {championTeam ? (
                   <div>
@@ -288,9 +299,7 @@ export const BracketView: React.FC<BracketViewProps> = ({
         </div>
       </div>
 
-      <p className="text-xs text-stone-500 dark:text-stone-400 mt-2">
-        Click any bracket fixture above to inspect scorers (&ldquo;Goal by&rdquo;), MVPs, referees, venues, and team captains.
-      </p>
+      <p className="text-xs text-stone-500 dark:text-stone-400 mt-2">{helperNote}</p>
 
       {/* Rich Match Detail Modal (when BracketView manages its own modal state) */}
       {!onSelectMatch && internalSelectedMatch && (

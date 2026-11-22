@@ -1,6 +1,6 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { Calendar, Clock, MapPin, Check, Sparkles, ChevronRight } from 'lucide-react';
-import type { BracketMatch, CategoryCompetition, Team } from '../types';
+import type { BracketMatch, CategoryCompetition, SiteCopyConfig, Team } from '../types';
 import { BracketView, MatchBreakdownModal } from './BracketView';
 
 interface CompetitionsSectionProps {
@@ -8,8 +8,7 @@ interface CompetitionsSectionProps {
   teams: Team[];
   compact: boolean;
   initialCategoryId?: string;
-  eyebrow?: string;
-  heading?: string;
+  siteCopy?: Partial<SiteCopyConfig>;
   onSoundTap: () => void;
 }
 
@@ -20,10 +19,25 @@ export const CompetitionsSection: React.FC<CompetitionsSectionProps> = ({
   teams,
   compact,
   initialCategoryId,
-  eyebrow = 'Match Results & Brackets',
-  heading = 'Match Results & Knockout Brackets',
+  siteCopy,
   onSoundTap,
 }) => {
+  const eyebrow = siteCopy?.competitionsEyebrow || 'Match Results & Brackets';
+  const heading = siteCopy?.competitionsHeading || 'Match Results & Knockout Brackets';
+  const tabAllLabel = siteCopy?.matchResultTabAllLabel || 'Full View';
+  const tabResultsLabel = siteCopy?.matchResultTabResultsLabel || 'Results';
+  const tabBracketLabel = siteCopy?.matchResultTabBracketLabel || 'Bracket';
+  const tabUpcomingLabel = siteCopy?.matchResultTabUpcomingLabel || 'Upcoming';
+  const completedStatLabel = siteCopy?.matchResultCompletedStatLabel || 'Completed Results:';
+  const upcomingStatLabel = siteCopy?.matchResultUpcomingStatLabel || 'Upcoming Fixtures:';
+  const totalStatLabel = siteCopy?.matchResultTotalStatLabel || 'Total Bracket Fixtures:';
+  const resultsTitle = siteCopy?.matchResultResultsTitle || 'Match Results';
+  const bracketTitle = siteCopy?.matchResultBracketTitle || 'Tournament Bracket';
+  const bracketSubtitle =
+    siteCopy?.matchResultBracketSubtitle || 'Single Elimination Progression';
+  const upcomingTitle = siteCopy?.matchResultUpcomingTitle || 'Upcoming Fixtures';
+  const breakdownButtonLabel = siteCopy?.matchResultBreakdownButtonLabel || 'Full Breakdown';
+  const versusLabel = siteCopy?.homeVersusLabel || 'vs';
   const [selectedCategoryId, setSelectedCategoryId] = useState<string>(
     initialCategoryId || categories[0]?.id || 'soccer-match'
   );
@@ -79,10 +93,10 @@ export const CompetitionsSection: React.FC<CompetitionsSectionProps> = ({
         <div className="inline-flex items-center gap-1 p-1 rounded-lg bg-stone-200/55 dark:bg-stone-900 border border-stone-200/60 dark:border-stone-800 self-start lg:self-auto overflow-x-auto max-w-full">
           {(
             [
-              { id: 'all', label: 'Full View' },
-              { id: 'results', label: 'Results' },
-              { id: 'bracket', label: 'Bracket' },
-              { id: 'upcoming', label: 'Upcoming' },
+              { id: 'all', label: tabAllLabel },
+              { id: 'results', label: tabResultsLabel },
+              { id: 'bracket', label: tabBracketLabel },
+              { id: 'upcoming', label: tabUpcomingLabel },
             ] as const
           ).map((tab) => (
             <button
@@ -151,19 +165,19 @@ export const CompetitionsSection: React.FC<CompetitionsSectionProps> = ({
 
         <div className="mt-6 pt-4 border-t border-stone-100 dark:border-stone-800 flex flex-wrap items-center gap-6 text-xs text-stone-600 dark:text-stone-400">
           <div>
-            <span className="text-stone-400 dark:text-stone-500 mr-1.5">Completed Results:</span>
+            <span className="text-stone-400 dark:text-stone-500 mr-1.5">{completedStatLabel}</span>
             <span className="font-mono tabular-nums font-semibold text-stone-900 dark:text-stone-100">
               {completedOrLiveMatches.length}
             </span>
           </div>
           <div>
-            <span className="text-stone-400 dark:text-stone-500 mr-1.5">Upcoming Fixtures:</span>
+            <span className="text-stone-400 dark:text-stone-500 mr-1.5">{upcomingStatLabel}</span>
             <span className="font-mono tabular-nums font-semibold text-stone-900 dark:text-stone-100">
               {upcomingMatches.length}
             </span>
           </div>
           <div>
-            <span className="text-stone-400 dark:text-stone-500 mr-1.5">Total Bracket Fixtures:</span>
+            <span className="text-stone-400 dark:text-stone-500 mr-1.5">{totalStatLabel}</span>
             <span className="font-mono tabular-nums font-semibold text-stone-900 dark:text-stone-100">
               {activeCategory.matches.length}
             </span>
@@ -176,7 +190,7 @@ export const CompetitionsSection: React.FC<CompetitionsSectionProps> = ({
         <div className="mt-10">
           <div className="flex items-baseline justify-between mb-4">
             <h3 className="font-serif text-xl sm:text-2xl font-medium text-stone-950 dark:text-stone-50">
-              Match Results — {activeCategory.name}
+              {resultsTitle} — {activeCategory.name}
             </h3>
             <span className="text-xs text-stone-500 dark:text-stone-400 font-mono tabular-nums">
               {completedOrLiveMatches.length} recorded
@@ -332,7 +346,7 @@ export const CompetitionsSection: React.FC<CompetitionsSectionProps> = ({
                         <span>{match.venue}</span>
                       </span>
                       <span className="inline-flex items-center gap-1 font-medium text-[var(--accent-text)]">
-                        <span>Full Breakdown</span>
+                        <span>{breakdownButtonLabel}</span>
                         <ChevronRight className="w-3.5 h-3.5" />
                       </span>
                     </div>
@@ -349,16 +363,17 @@ export const CompetitionsSection: React.FC<CompetitionsSectionProps> = ({
         <div className="mt-12">
           <div className="flex items-baseline justify-between mb-5">
             <h3 className="font-serif text-xl sm:text-2xl font-medium text-stone-950 dark:text-stone-50">
-              Tournament Bracket — {activeCategory.name}
+              {bracketTitle} — {activeCategory.name}
             </h3>
             <span className="text-xs text-stone-500 dark:text-stone-400">
-              Single Elimination Progression
+              {bracketSubtitle}
             </span>
           </div>
 
           <BracketView
             matches={activeCategory.matches}
             teams={teams}
+            siteCopy={siteCopy}
             onSoundTap={onSoundTap}
             onSelectMatch={(match) => setSelectedMatch(match)}
           />
@@ -370,7 +385,7 @@ export const CompetitionsSection: React.FC<CompetitionsSectionProps> = ({
         <div className="mt-12">
           <div className="flex items-baseline justify-between mb-4">
             <h3 className="font-serif text-xl sm:text-2xl font-medium text-stone-950 dark:text-stone-50">
-              Upcoming Fixtures — {activeCategory.name}
+              {upcomingTitle} — {activeCategory.name}
             </h3>
             <span className="text-xs text-stone-500 dark:text-stone-400 font-mono tabular-nums">
               {upcomingMatches.length} scheduled
@@ -405,7 +420,7 @@ export const CompetitionsSection: React.FC<CompetitionsSectionProps> = ({
                     <p className="text-base sm:text-lg font-medium text-stone-950 dark:text-stone-50">
                       <span>{getTeamDisplay(match.teamAId)}</span>
                       <span className="mx-2.5 text-xs uppercase tracking-widest text-stone-400 font-normal">
-                        vs
+                        {versusLabel}
                       </span>
                       <span>{getTeamDisplay(match.teamBId)}</span>
                     </p>
